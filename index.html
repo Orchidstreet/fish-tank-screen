@@ -2045,6 +2045,7 @@ uniform float uXs;
 uniform mat4 uSunVP; uniform mat4 uRoomVP; uniform highp sampler2DShadow uSunMap; uniform highp sampler2DShadow uRoomMap; uniform float uShOn; uniform float uFlood;
 uniform float uMirror; uniform vec2 uRes; uniform sampler2D uMirTex;
 uniform vec4 uGlow[8]; uniform vec3 uGlowCol[8]; uniform float uNight;
+uniform vec4 uStimE; uniform vec3 uStimD;
 `;
 const FCOMMON = `
 float hash21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
@@ -2287,6 +2288,8 @@ void main(){
   vec3 base=vec3(iRoot.x*uXs, -uTank.y, iRoot.y);
   float sw=s*s;
   vec3 c=base+vec3(sw*(.17*sin(uTime*.7+ph+s*3.)+.05*sin(uTime*1.7+ph*2.+s*7.)), s*h, sw*.13*sin(uTime*.55+ph*1.3+s*2.5));
+  { vec3 q=c-uStimE.xyz; float tq=dot(q,uStimD); vec3 rq=q-uStimD*tq; float dq=length(rq);
+    c+=rq/max(dq,1e-3)*.2*sw*uStimE.w*smoothstep(.75,.05,dq)*step(0.,tq); }
   float tw=ph+s*2.6+.35*sin(uTime*.5+ph);
   vec3 wd=vec3(cos(tw),0.,sin(tw));
   float wid=iW.x*(1.-sw*.85)*(.45+.55*smoothstep(0.,.12,s));
@@ -2531,6 +2534,8 @@ const pr=new Float32Array(N);
 const lag=new Float32Array(N), ang=new Float32Array(N), rr=new Float32Array(N), outF=new Uint8Array(N);
 const lon=[]; // loners: slow single fish at many depths
 let simT=0;
+// live page only: the pointer scares the schools, a click drops food. Off in film renders, so those stay repeatable.
+const stim={k:0, ex:0,ey:.12,ez:5, dx:0,dy:0,dz:-1, sx:0,sy:0,last:-1e9, food:[]};
 
 const out1 = t => ss(33,37,t)-ss(45.5,48.5,t), out2 = t => ss(62.5,64.2,t);
 const outness = t => out1(t)+out2(t);
@@ -2630,8 +2635,15 @@ function step(t, dt){
   // schools: spring to a moving target, keep apart, stay in the water unless invited out
   for(let i=S0;i<N;i++){
     target(i,t,_T);
+    if(stim.food.length){ const F=stim.food[i%stim.food.length];
+      _T[0]=mix(_T[0],F[0]+ox[i]*.22,.92); _T[1]=mix(_T[1],F[1]+oy[i]*.22,.92); _T[2]=mix(_T[2],F[2]+oz[i]*.22,.92);
+      const fx=px[i]-F[0], fy=py[i]-F[1], fz=pz[i]-F[2]; if(fx*fx+fy*fy+fz*fz<.006) F[3]=Math.min(F[3],.25); }
     vx[i]+=((_T[0]-px[i])*9-vx[i]*4)*dt; vy[i]+=((_T[1]-py[i])*9-vy[i]*4)*dt; vz[i]+=((_T[2]-pz[i])*9-vz[i]*4)*dt;
+    if(stim.k>.01){ const qx=px[i]-stim.ex, qy=py[i]-stim.ey, qz=pz[i]-stim.ez, tt=qx*stim.dx+qy*stim.dy+qz*stim.dz;
+      if(tt>0){ const rx=qx-stim.dx*tt, ry=qy-stim.dy*tt, rz=qz-stim.dz*tt, d2=rx*rx+ry*ry+rz*rz;
+        if(d2<.42 && d2>1e-6){ const d=Math.sqrt(d2), f=1-d/.65, a=46*f*f*stim.k*dt/d; vx[i]+=rx*a; vy[i]+=ry*a; vz[i]+=rz*a; } } }
   }
+  for(let k=stim.food.length-1;k>=0;k--){ const F=stim.food[k]; F[1]=Math.max(F[1]-.11*dt,F[4]); F[3]-=dt; if(F[3]<=0) stim.food.splice(k,1); }
   for(let i=S0;i<N;i++) for(let j=i+1;j<N;j++){
     const ex=px[i]-px[j]; if(ex>.11||ex<-.11) continue;
     const ey=py[i]-py[j]; if(ey>.11||ey<-.11) continue;
@@ -2870,6 +2882,7 @@ function common(pr){
   gl.uniformMatrix4fv(u.uSunVP,false,sunVP); gl.uniformMatrix4fv(u.uRoomVP,false,roomVP);
   gl.uniform1i(u.uSunMap,5); gl.uniform1i(u.uRoomMap,6); gl.uniform1f(u.uShOn,state.shOn); gl.uniform1f(u.uFlood,state.flood);
   gl.uniform1f(u.uMirror,state.mirror); gl.uniform2f(u.uRes,W,H); gl.uniform1i(u.uMirTex,7);
+  gl.uniform4f(u.uStimE,stim.ex,stim.ey,stim.ez,stim.k); gl.uniform3f(u.uStimD,stim.dx,stim.dy,stim.dz);
   gl.uniform1f(u.uNight,state.night); if(u.uGlow){ gl.uniform4fv(u.uGlow,glowPos); gl.uniform3fv(u.uGlowCol,glowCol); } gl.uniform1f(u.uTime,state.time);
   gl.uniform3f(u.uTank,TW,TH,state.depthU); gl.uniform4f(u.uFog,state.fogK,state.level,state.sun,state.open);
   gl.uniform2f(u.uFocus,1/(EZ-state.fz),9); gl.uniform1f(u.uXs,XS);
@@ -2882,6 +2895,16 @@ const ctx={gl,canvas,prog,common,buf,attr,HEAD,FCOMMON,POST_VS,quadVAO,state,eye
   paths:{whale:whalePos, hero:heroPos, eye:eyeAuto}, dims:()=>({A,TW,TH,FR,WM,XS})};
 const EXT=(window.FILM_EXT||[]).map(f=>f(ctx));
 function ext(hook,a,b){ for(const e of EXT) if(e[hook]) e[hook](a,b); }
+const FOOD_VS=`layout(location=0) in vec3 aP; out vec3 vW;
+void main(){ vW=aP; gl_Position=uVP*vec4(aP,1.); gl_PointSize=max(uRes.y*.5*5.*.013/(uEye.z-aP.z)*2.,2.5); }`;
+const FOOD_FS=`in vec3 vW; out vec4 o;
+void main(){ vec2 q=gl_PointCoord*2.-1.; float r=dot(q,q); if(r>1.) discard;
+  vec3 c=vec3(.78,.42,.16)*(.55+.6*(1.-r))*(.6+.6*sunSh(vW)); o=vec4(applyWater(c*dayK()+vec3(.05,.03,.01),vW),1.); }`;
+const foodProg=prog(FOOD_VS,FOOD_FS), foodVAO=gl.createVertexArray(), foodArr=new Float32Array(48*3);
+gl.bindVertexArray(foodVAO); const foodBuf=buf(foodArr,gl.DYNAMIC_DRAW); attr(0,3,12,0); gl.bindVertexArray(null);
+function drawFood(){ const n=Math.min(48,stim.food.length); if(!n) return;
+  for(let k=0;k<n;k++){ foodArr[k*3]=stim.food[k][0]; foodArr[k*3+1]=stim.food[k][1]; foodArr[k*3+2]=stim.food[k][2]; }
+  common(foodProg); gl.bindVertexArray(foodVAO); gl.bindBuffer(gl.ARRAY_BUFFER,foodBuf); gl.bufferSubData(gl.ARRAY_BUFFER,0,foodArr); gl.drawArrays(gl.POINTS,0,n); }
 const _e=[0,0,0];
 function renderSample(t, lx,ly, jx,jy, capI, capA, kx,ky){
   const pk=sat((t-4.2)/5.3); const ease=pk<.5? 4*pk*pk*pk : 1-Math.pow(-2*pk+2,3)/2;
@@ -2951,7 +2974,7 @@ function renderSample(t, lx,ly, jx,jy, capI, capA, kx,ky){
     common(P.kelp); gl.bindVertexArray(kelpVAO); gl.drawElementsInstanced(gl.TRIANGLES,kelpIdx,gl.UNSIGNED_SHORT,0,kelpInst);
     common(P.fish); gl.bindVertexArray(fishVAO); gl.drawArraysInstanced(gl.TRIANGLES,0,fishCount,N);
   }
-  state.pass='main'; ext('opaque','main',t);
+  state.pass='main'; ext('opaque','main',t); drawFood();
   if(open>0){ common(P.ocean); gl.bindVertexArray(oceanVAO); gl.drawArrays(gl.TRIANGLES,0,12); }
   gl.enable(gl.BLEND); gl.depthMask(false);
   if(wet){
@@ -3052,12 +3075,24 @@ window.__film={ renderFrame, showAt, TOTAL, FPS };
         else if(k==='ArrowLeft') tau=Math.max(0,tau-(e.shiftKey?10:2));
         else if(k==='r'||k==='R') tau=0;
         else if(k>='1'&&k<='4') S=[1,4,8,16][+k-1]; });
-      canvas.addEventListener('click',()=>{ paused=!paused; });
+      const ptr=e=>{ const r=canvas.getBoundingClientRect(), ar=W/H; let w=r.width, h=r.height, x0=r.left, y0=r.top;
+        if(w/h>ar){ const w2=h*ar; x0+=(w-w2)/2; w=w2; } else { const h2=w/ar; y0+=(h-h2)/2; h=h2; }
+        const u=(e.clientX-x0)/w, v=(e.clientY-y0)/h; return (u<0||u>1||v<0||v>1)? null : [(u*2-1)*A, 1-v*2]; };
+      const aim=()=>{ const E=eyeAuto(showAt(tau)[0],[0,0,0]); let ax=stim.sx-E[0], ay=stim.sy-E[1], az=-E[2]; const l=Math.hypot(ax,ay,az);
+        stim.ex=E[0]; stim.ey=E[1]; stim.ez=E[2]; stim.dx=ax/l; stim.dy=ay/l; stim.dz=az/l; };
+      canvas.addEventListener('pointermove',e=>{ const q=ptr(e); if(q){ stim.sx=q[0]; stim.sy=q[1]; stim.last=performance.now(); } });
+      canvas.addEventListener('pointerleave',()=>{ stim.last=-1e9; });
+      const foodR=rng(77);
+      canvas.addEventListener('pointerdown',e=>{ const q=ptr(e); if(!q || state.level<TH) return; stim.sx=q[0]; stim.sy=q[1]; aim();
+        const zf=-1.0-2.2*foodR(), tt=(zf-stim.ez)/stim.dz;
+        const bx=Math.max(-TW+.2,Math.min(TW-.2,stim.ex+stim.dx*tt)), by=Math.max(-TH+.3,Math.min(TH-.12,stim.ey+stim.dy*tt));
+        for(let k=0;k<7 && stim.food.length<48;k++) stim.food.push([bx+(foodR()-.5)*.16, by+(foodR()-.5)*.1, zf+(foodR()-.5)*.16, 7+2*foodR(), -TH+.03]); });
       const loop=now=>{ const dt=Math.min(.1,(now-last)/1000); last=now; if(!paused) tau+=dt; if(tau>=TOTAL/FPS) tau=0;
+        aim(); stim.k+=(((now-stim.last<2500)?1:0)-stim.k)*Math.min(1,dt*6);
         renderFrame(tau*FPS,S); fpsAvg+=((1/Math.max(dt,1e-3))-fpsAvg)*.05;
         // slow machine: reload once at a lighter size
         if(!qs.has('w') && now-t0>6000 && now-t0<7000 && fpsAvg<18){ location.replace(location.pathname+'?w=852'); return; }
-        hud.textContent='film '+tau.toFixed(1)+' s of '+(TOTAL/FPS)+'   show '+showAt(tau)[0].toFixed(1)+' s   '+fpsAvg.toFixed(0)+' fps   samples '+S+(paused?'   PAUSED':'')+'\nspace: pause   arrows: scrub 2 s (shift 10 s)   R: restart   1-4: quality';
+        hud.textContent='film '+tau.toFixed(1)+' s of '+(TOTAL/FPS)+'   show '+showAt(tau)[0].toFixed(1)+' s   '+fpsAvg.toFixed(0)+' fps   samples '+S+(paused?'   PAUSED':'')+'\nmove the pointer: fish scatter, seaweed leans   click in the water: feed them\nspace: pause   arrows: scrub 2 s (shift 10 s)   R: restart   1-4: quality';
         requestAnimationFrame(loop); };
       requestAnimationFrame(loop);
     }

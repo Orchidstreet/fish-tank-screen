@@ -12,7 +12,9 @@ Open the live page in a desktop browser and make it full screen. The film is 65 
 
 | Key | What it does |
 | --- | --- |
-| Space or click | Pause |
+| Move the pointer | The schools scatter from it and the seaweed leans away |
+| Click in the water | Drops food. The schools swarm to it |
+| Space | Pause |
 | Left and right arrows | Scrub 2 seconds (hold Shift for 10) |
 | R | Restart |
 | 1 to 4 | Quality: 1, 4, 8 or 16 samples per frame |
